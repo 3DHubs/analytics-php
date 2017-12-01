@@ -40,7 +40,15 @@ if(file_exists($old)) {
     }
 }
 
-foreach(scandir($dir) as $file) {
+Segment::init($args["secret"], array(
+    "debug" => true,
+    "error_handler" => function($code, $msg){
+        print("$code: $msg\n");
+        exit(1);
+    }
+));
+
+foreach(scandir($dir, SCANDIR_SORT_NONE) as $file) {
     if (substr($file, 0, strlen('analytics-')) !== 'analytics-') {
         continue;
     }
@@ -52,20 +60,18 @@ foreach(scandir($dir) as $file) {
     * File contents.
     */
 
-    $contents = file_get_contents($file);
+    $fp = fopen($file, 'r');
+    // We lock the file in case this whole thing takes so long that another
+    // instance of the script could start reading from the same file.
+    if (!flock($fp, LOCK_EX)) {
+        continue;
+    }
+    $contents = fread($fp, filesize($file));
     $lines = explode("\n", $contents);
 
     /**
     * Initialize the client.
     */
-
-    Segment::init($args["secret"], array(
-        "debug" => true,
-        "error_handler" => function($code, $msg){
-            print("$code: $msg\n");
-            exit(1);
-        }
-    ));
 
     /**
     * Payloads
@@ -87,6 +93,8 @@ foreach(scandir($dir) as $file) {
     }
 
     Segment::flush();
+    flock($fp, LOCK_UN);
+    fclose($fp);
     unlink($file);
 
     print("sent $successful from $total requests successfully");
